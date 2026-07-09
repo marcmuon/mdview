@@ -1,0 +1,220 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#   "markdown", "pymdown-extensions",
+#   "pyobjc-framework-Cocoa", "pyobjc-framework-Quartz",
+# ]
+# ///
+"""mdview <file.md> — render Markdown to a themed HTML window (macOS).
+
+Renders GitHub-flavored Markdown to a Catppuccin Macchiato page and opens it in
+Safari, positioned on your external monitor. macOS only: it uses Quartz/AppKit
+for display geometry and Safari's own AppleScript `bounds` to place the window
+deterministically (no Accessibility permission, no dedicated browser profile).
+
+Env overrides:
+  MDVIEW_MONITOR   'main', 'external' (default), or a display-name substring
+  MDVIEW_POS       "X,Y" — pin the window top-left to global screen coords
+  MDVIEW_BROWSER   open in this app instead of Safari (e.g. "Firefox")
+  MDVIEW_NO_OPEN   set to 1 to only render and print the HTML path
+"""
+import hashlib
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+import markdown
+
+CSS = """
+:root{
+  --base:#24273a; --mantle:#1e2030; --crust:#181926;
+  --s0:#363a4f; --s1:#494d64; --ov1:#8087a2;
+  --text:#cad3f5; --sub:#a5adcb;
+  --blue:#8aadf4; --lav:#b7bdf8; --mauve:#c6a0f6;
+  --green:#a6da95; --peach:#f5a97f; --red:#ed8796; --yellow:#eed49f; --teal:#8bd5ca;
+}
+*{box-sizing:border-box}
+html{color-scheme:dark}
+body{
+  margin:0; background:var(--base); color:var(--text);
+  font:16px/1.7 -apple-system,BlinkMacSystemFont,"Inter","SF Pro Text",system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:860px;margin:0 auto;padding:56px 40px 120px}
+h1,h2,h3,h4{line-height:1.3;font-weight:650;margin:1.8em 0 .6em}
+h1{font-size:1.9em;color:var(--lav);border-bottom:1px solid var(--s0);padding-bottom:.3em}
+h2{font-size:1.45em;color:var(--mauve);border-bottom:1px solid var(--s0);padding-bottom:.25em}
+h3{font-size:1.2em;color:var(--blue)}
+h4{font-size:1.05em;color:var(--teal)}
+a{color:var(--blue);text-decoration:none;border-bottom:1px solid transparent}
+a:hover{border-bottom-color:var(--blue)}
+p,li{color:var(--text)}
+strong{color:var(--yellow);font-weight:650}
+em{color:var(--sub)}
+del{color:var(--ov1)}
+hr{border:none;border-top:1px solid var(--s0);margin:2.4em 0}
+blockquote{margin:1.2em 0;padding:.2em 1.1em;border-left:3px solid var(--mauve);
+  background:var(--mantle);border-radius:4px;color:var(--sub)}
+code{font:.88em/1.6 "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace;
+  background:var(--s0);color:var(--peach);padding:.15em .4em;border-radius:5px}
+pre{background:var(--crust);border:1px solid var(--s0);border-radius:10px;
+  padding:16px 18px;overflow-x:auto;margin:1.2em 0}
+pre code{background:none;color:var(--text);padding:0}
+table{border-collapse:collapse;width:100%;margin:1.4em 0;font-size:.94em;
+  display:block;overflow-x:auto}
+th,td{border:1px solid var(--s1);padding:8px 13px;text-align:left}
+th{background:var(--mantle);color:var(--lav);font-weight:600}
+tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+ul,ol{padding-left:1.5em}
+li{margin:.3em 0}
+.task-list-item{list-style:none;margin-left:-1.5em}
+.task-list-item input{margin-right:.6em;accent-color:var(--green);transform:scale(1.15)}
+::selection{background:var(--s1)}
+::-webkit-scrollbar{height:10px;width:10px}
+::-webkit-scrollbar-thumb{background:var(--s1);border-radius:6px}
+::-webkit-scrollbar-track{background:var(--mantle)}
+"""
+
+TEMPLATE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title}</title><style>{css}</style></head>
+<body><div class="wrap">{body}</div></body></html>"""
+
+
+VERSION = "1.0.0"
+
+
+def _list_monitors() -> int:
+    try:
+        from AppKit import NSScreen
+        import Quartz
+        main_id = int(Quartz.CGMainDisplayID())
+        for s in NSScreen.screens():
+            did = int(s.deviceDescription()["NSScreenNumber"])
+            b = Quartz.CGDisplayBounds(did)
+            tag = " [main]" if did == main_id else ""
+            print(f"{s.localizedName()}{tag}  "
+                  f"origin=({int(b.origin.x)},{int(b.origin.y)}) "
+                  f"size=({int(b.size.width)}x{int(b.size.height)})")
+    except Exception as exc:
+        print(f"mdview: cannot read displays: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    if not args or args[0] in ("-h", "--help"):
+        print(f"{__doc__.strip()}\n\n"
+              "Usage: mdview <file.md>\n"
+              "       mdview --monitors    list detected displays + names\n"
+              "       mdview --version")
+        return 0 if args else 2
+    if args[0] == "--version":
+        print(f"mdview {VERSION}")
+        return 0
+    if args[0] == "--monitors":
+        return _list_monitors()
+    src = Path(args[0]).expanduser().resolve()
+    if not src.is_file():
+        print(f"mdview: not a file: {src}", file=sys.stderr)
+        return 1
+
+    body = markdown.markdown(
+        src.read_text(encoding="utf-8"),
+        extensions=[
+            "extra", "sane_lists", "smarty", "toc",
+            "pymdownx.tasklist", "pymdownx.superfences",
+            "pymdownx.tilde", "pymdownx.betterem",
+        ],
+        extension_configs={"pymdownx.tasklist": {"custom_checkbox": True}},
+    )
+    html = TEMPLATE.format(title=src.name, css=CSS, body=body)
+
+    out_dir = Path(tempfile.gettempdir()) / "mdview"
+    out_dir.mkdir(exist_ok=True)
+    stable = hashlib.sha1(str(src).encode()).hexdigest()[:12]
+    out = out_dir / f"{stable}.html"
+    out.write_text(html, encoding="utf-8")
+
+    if os.environ.get("MDVIEW_NO_OPEN"):
+        print(out)
+        return 0
+
+    url = out.as_uri()
+    geo = _window_geometry()
+
+    # Safari: on every Mac (no dependency), scriptable window `bounds` lets us
+    # place it deterministically on each render — no fragile Accessibility path,
+    # no dedicated profile. Override with MDVIEW_BROWSER for a different app.
+    if os.environ.get("MDVIEW_BROWSER"):
+        subprocess.run(["open", "-a", os.environ["MDVIEW_BROWSER"], url], check=False)
+        return 0
+    if not Path("/Applications/Safari.app").exists():
+        subprocess.run(["open", url], check=False)
+        return 0
+
+    bounds = ""
+    if geo:
+        x, y, w, h = geo
+        bounds = f"set bounds of front window to {{{x}, {y}, {x + w}, {y + h}}}"
+    script = f'''
+    tell application "Safari"
+      activate
+      if (count of documents) is 0 then
+        make new document with properties {{URL:"{url}"}}
+      else
+        set URL of front document to "{url}"
+      end if
+      delay 0.25
+      {bounds}
+    end tell'''
+    r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+    if r.returncode != 0:
+        # first run prompts "Terminal wants to control Safari" — approve once
+        subprocess.run(["open", "-a", "Safari", url], check=False)
+        if "not authoriz" in (r.stderr or "").lower() or "1743" in (r.stderr or ""):
+            print("mdview: approve the one-time 'control Safari' automation prompt, "
+                  "then rerun to place it on the external monitor.", file=sys.stderr)
+    return 0
+
+
+def _window_geometry():
+    """Return (x, y, w, h) for the chosen monitor's top-left window slot, or None."""
+    if forced := os.environ.get("MDVIEW_POS"):
+        try:
+            x, y = (int(v) for v in forced.split(","))
+            return x, y, 1100, 1000
+        except ValueError:
+            pass
+    want = os.environ.get("MDVIEW_MONITOR", "external").lower()
+    try:
+        from AppKit import NSScreen
+        import Quartz
+        main = int(Quartz.CGMainDisplayID())
+        screens = []
+        for s in NSScreen.screens():
+            did = int(s.deviceDescription()["NSScreenNumber"])
+            screens.append((s.localizedName(), did, Quartz.CGDisplayBounds(did)))
+
+        target = None
+        if want == "main":
+            target = next((b for _, d, b in screens if d == main), None)
+        else:
+            # name substring match first (e.g. "p24qd", "dell"), else first external
+            target = next((b for n, _, b in screens if want in n.lower()), None)
+            if target is None:
+                target = next((b for _, d, b in screens if d != main), None)
+        if target is None:
+            return None
+        x, y, w, h = int(target.origin.x), int(target.origin.y), int(target.size.width), int(target.size.height)
+        return x + 60, y + 70, min(1100, max(700, w - 120)), max(600, h - 160)
+    except Exception:
+        return None
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
