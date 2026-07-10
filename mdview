@@ -167,7 +167,9 @@ def main() -> int:
       if (count of documents) is 0 then
         make new document with properties {{URL:"{url}"}}
       else
-        set URL of front document to "{url}"
+        tell front window
+          set |current tab| to (make new tab with properties {{URL:"{url}"}})
+        end tell
       end if
       delay 0.25
       {bounds}
