@@ -74,6 +74,27 @@ the name from `NSScreen.localizedName`) and sets Safari's window `bounds`
 directly via AppleScript on every render. Deterministic, no window-manager, no
 "park it once and hope."
 
+## Extra: HTML → Markdown bookmarklet
+
+Getting a web page *into* Markdown shouldn't cost money either. Safari's
+HTML-to-Markdown extensions are paid apps (Apple's $99/yr developer fee means
+even open-source ones charge), and the usual free workaround — a bookmarklet
+that pulls a converter off a CDN — dies on any site with a strict
+Content-Security-Policy and asks you to trust remote code sight unseen.
+
+[`bookmarklet/`](bookmarklet/) has a self-contained one: zero network, zero
+dependencies, ~150 readable lines, jsdom-tested. Click it (or highlight text
+first) and clean GFM — real pipe tables included — lands on your clipboard,
+ready for:
+
+```sh
+pbpaste > /tmp/page.md && mdview /tmp/page.md
+```
+
+Install: paste the contents of
+[`bookmarklet/bookmarklet.txt`](bookmarklet/bookmarklet.txt) into a Safari
+bookmark's address. Details in [`bookmarklet/README.md`](bookmarklet/README.md).
+
 ## License
 
 MIT © Marc Kelechava
