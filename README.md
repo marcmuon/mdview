@@ -9,6 +9,11 @@ glance at, not wherever a browser happened to be. One dependency-free command
 (deps auto-install via [uv](https://docs.astral.sh/uv/)), no Electron, no app to
 buy.
 
+No external monitor? Still the fastest way to get a rendered doc out of the
+terminal: the page simply opens in Safari on your current desktop. Set
+`MDVIEW_MONITOR=main` if you also want the window deterministically sized and
+placed. The monitor targeting is the bonus, not the requirement.
+
 > macOS only. It uses Quartz/AppKit to find your displays and Safari's own
 > AppleScript `bounds` to position the window deterministically — no
 > Accessibility permission and no dedicated browser profile.
@@ -63,7 +68,9 @@ md report.md              # if you set the alias
 | `MDVIEW_NO_OPEN` | _(unset)_ | `1` to only render and print the HTML path (pipe-friendly) |
 
 With one monitor it just opens on your main display. Unplug the external and it
-falls back cleanly — display detection is live on every run.
+falls back cleanly — display detection is live on every run. On a
+single-display setup, `MDVIEW_MONITOR=main` still gives you a deterministically
+sized and positioned window instead of just a new tab.
 
 ## How placement works
 
