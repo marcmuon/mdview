@@ -1,0 +1,12 @@
+{
+  "name": "html2md-bookmarklet",
+  "private": true,
+  "description": "Dev harness for the html2md Safari bookmarklet. Users never need this — just copy bookmarklet.txt.",
+  "scripts": {
+    "build": "node build.js",
+    "test": "node build.js --check && node test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1"
+  }
+}

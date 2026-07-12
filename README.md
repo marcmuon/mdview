@@ -9,6 +9,11 @@ glance at, not wherever a browser happened to be. One dependency-free command
 (deps auto-install via [uv](https://docs.astral.sh/uv/)), no Electron, no app to
 buy.
 
+No external monitor? Still the fastest way to get a rendered doc out of the
+terminal: the page simply opens in Safari on your current desktop. Set
+`MDVIEW_MONITOR=main` if you also want the window deterministically sized and
+placed. The monitor targeting is the bonus, not the requirement.
+
 > macOS only. It uses Quartz/AppKit to find your displays and Safari's own
 > AppleScript `bounds` to position the window deterministically — no
 > Accessibility permission and no dedicated browser profile.
@@ -63,7 +68,9 @@ md report.md              # if you set the alias
 | `MDVIEW_NO_OPEN` | _(unset)_ | `1` to only render and print the HTML path (pipe-friendly) |
 
 With one monitor it just opens on your main display. Unplug the external and it
-falls back cleanly — display detection is live on every run.
+falls back cleanly — display detection is live on every run. On a
+single-display setup, `MDVIEW_MONITOR=main` still gives you a deterministically
+sized and positioned window instead of just a new tab.
 
 ## How placement works
 
@@ -73,6 +80,27 @@ the target display's real screen rectangle (Quartz `CGDisplayBounds` keyed to
 the name from `NSScreen.localizedName`) and sets Safari's window `bounds`
 directly via AppleScript on every render. Deterministic, no window-manager, no
 "park it once and hope."
+
+## Extra: HTML → Markdown bookmarklet
+
+Getting a web page *into* Markdown shouldn't cost money either. Safari's
+HTML-to-Markdown extensions are paid apps (Apple's $99/yr developer fee means
+even open-source ones charge), and the usual free workaround — a bookmarklet
+that pulls a converter off a CDN — dies on any site with a strict
+Content-Security-Policy and asks you to trust remote code sight unseen.
+
+[`bookmarklet/`](bookmarklet/) has a self-contained one: zero network, zero
+dependencies, ~150 readable lines, jsdom-tested. Click it (or highlight text
+first) and clean GFM — real pipe tables included — lands on your clipboard,
+ready for:
+
+```sh
+pbpaste > /tmp/page.md && mdview /tmp/page.md
+```
+
+Install: paste the contents of
+[`bookmarklet/bookmarklet.txt`](bookmarklet/bookmarklet.txt) into a Safari
+bookmark's address. Details in [`bookmarklet/README.md`](bookmarklet/README.md).
 
 ## License
 
